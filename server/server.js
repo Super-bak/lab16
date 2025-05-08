@@ -7,7 +7,16 @@ const bcrypt = require('bcrypt');
 const { query } = require('./config/db');
 require('dotenv').config();
 const winston = require('winston');
-
+const logger = winston.createLogger({
+  level: 'info',
+  format: logger.format.combine(
+    logger.format.timestamp(),
+    logger.format.json()
+  ),
+  transports: [
+    new logger.transports.Console()
+  ]
+});
 const app = express();
 const server = http.createServer(app);
 
@@ -51,7 +60,7 @@ const authenticateToken = (req, res, next) => {
 // Register new user
 app.post('/api/register', async (req, res) => {
   try {
-    winston.log('Registration attempt:', req.body.username);
+    logger.info('Registration attempt:', req.body.username);
     const { username, password } = req.body;
 
     if (!username || !password) {
@@ -59,19 +68,19 @@ app.post('/api/register', async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    winston.log('Password hashed successfully');
+    logger.log('Password hashed successfully');
 
     const result = await query(
       'INSERT INTO users (username, password) VALUES ($1, $2) RETURNING id',
       [username, hashedPassword]
     );
-    winston.log('User created successfully:', result.rows[0].id);
+    logger.log('User created successfully:', result.rows[0].id);
 
     const token = jwt.sign({ id: result.rows[0].id, username }, process.env.JWT_SECRET);
-    winston.log('JWT token generated');
+    logger.log('JWT token generated');
     res.json({ token });
   } catch (error) {
-    winston.error('Registration error:', error);
+    logger.error('Registration error:', error);
     if (error.code === '23505') { // Unique violation
       res.status(400).json({ error: 'Username already exists' });
     } else if (error.code === '28P01') { // Invalid password
@@ -87,7 +96,7 @@ app.post('/api/register', async (req, res) => {
 // Login user
 app.post('/api/login', async (req, res) => {
   try {
-    winston.log('Login attempt:', req.body.username);
+    logger.log('Login attempt:', req.body.username);
     const { username, password } = req.body;
 
     if (!username || !password) {
@@ -95,7 +104,7 @@ app.post('/api/login', async (req, res) => {
     }
 
     const result = await query('SELECT * FROM users WHERE username = $1', [username]);
-    winston.log('User query result:', result.rows.length ? 'User found' : 'User not found');
+    logger.log('User query result:', result.rows.length ? 'User found' : 'User not found');
 
     if (result.rows.length === 0) {
       return res.status(400).json({ error: 'User not found' });
@@ -103,17 +112,17 @@ app.post('/api/login', async (req, res) => {
 
     const user = result.rows[0];
     const validPassword = await bcrypt.compare(password, user.password);
-    winston.log('Password validation:', validPassword ? 'Valid' : 'Invalid');
+    logger.log('Password validation:', validPassword ? 'Valid' : 'Invalid');
 
     if (!validPassword) {
       return res.status(400).json({ error: 'Invalid password' });
     }
 
     const token = jwt.sign({ id: user.id, username }, process.env.JWT_SECRET);
-    winston.log('Login successful, token generated');
+    logger.log('Login successful, token generated');
     res.json({ token });
   } catch (error) {
-    winston.error('Login error:', error);
+    logger.error('Login error:', error);
     if (error.code === '28P01') { // Invalid password
       res.status(500).json({ error: 'Database authentication failed' });
     } else if (error.code === '3D000') { // Database does not exist
@@ -136,7 +145,7 @@ app.get('/api/friends/:userId', authenticateToken, async (req, res) => {
     `, [userId]);
     res.json(result.rows);
   } catch (error) {
-    winston.error('Error fetching friends:', error);
+    logger.error('Error fetching friends:', error);
     res.status(500).json({ error: 'Error fetching friends' });
   }
 });
@@ -144,7 +153,7 @@ app.get('/api/friends/:userId', authenticateToken, async (req, res) => {
 // Send friend request
 app.post('/api/friends/request', authenticateToken, async (req, res) => {
   try {
-    winston.log('Friend request received:', req.body);
+    logger.log('Friend request received:', req.body);
     const { userId, friendUsername } = req.body;
     
     if (!userId || !friendUsername) {
@@ -179,7 +188,7 @@ app.post('/api/friends/request', authenticateToken, async (req, res) => {
       [userId, friendId, 'pending']
     );
 
-    winston.log('Friend request created:', result.rows[0]);
+    logger.log('Friend request created:', result.rows[0]);
 
     // Emit friend request event
     io.to(friendId.toString()).emit('friend_request', {
@@ -189,7 +198,7 @@ app.post('/api/friends/request', authenticateToken, async (req, res) => {
 
     res.json({ message: 'Friend request sent successfully' });
   } catch (error) {
-    winston.error('Error in friend request:', error);
+    logger.error('Error in friend request:', error);
     if (error.code === '23505') { // Unique violation
       res.status(400).json({ error: 'Friend request already exists' });
     } else if (error.code === '23503') { // Foreign key violation
@@ -213,7 +222,7 @@ app.get('/api/friends/pending/:userId', authenticateToken, async (req, res) => {
     `, [userId]);
     res.json(result.rows);
   } catch (error) {
-    winston.error('Error fetching pending requests:', error);
+    logger.error('Error fetching pending requests:', error);
     res.status(500).json({ error: 'Error fetching pending requests' });
   }
 });
@@ -248,7 +257,7 @@ app.post('/api/friends/accept', authenticateToken, async (req, res) => {
 
     res.json({ message: 'Friend request accepted' });
   } catch (error) {
-    winston.error('Error accepting friend request:', error);
+    logger.error('Error accepting friend request:', error);
     res.status(500).json({ error: 'Error accepting friend request' });
   }
 });
@@ -266,7 +275,7 @@ app.get('/api/groups/:groupId/messages', authenticateToken, async (req, res) => 
     `, [groupId]);
     res.json(result.rows);
   } catch (error) {
-    winston.error('Error fetching group messages:', error);
+    logger.error('Error fetching group messages:', error);
     res.status(500).json({ error: 'Error fetching group messages' });
   }
 });
@@ -285,7 +294,7 @@ app.get('/api/messages/:userId/:friendId', authenticateToken, async (req, res) =
     `, [userId, friendId]);
     res.json(result.rows);
   } catch (error) {
-    winston.error('Error fetching messages:', error);
+    logger.error('Error fetching messages:', error);
     res.status(500).json({ error: 'Error fetching messages' });
   }
 });
@@ -317,7 +326,7 @@ app.post('/api/groups', authenticateToken, async (req, res) => {
       group: result.rows[0]
     });
   } catch (error) {
-    winston.error('Error creating group:', error);
+    logger.error('Error creating group:', error);
     if (error.code === '23505') { // Unique violation
       res.status(400).json({ error: 'Group name already exists' });
     } else {
@@ -340,7 +349,7 @@ app.get('/api/groups/:userId', authenticateToken, async (req, res) => {
     `, [userId]);
     res.json(result.rows);
   } catch (error) {
-    winston.error('Error fetching groups:', error);
+    logger.error('Error fetching groups:', error);
     res.status(500).json({ error: 'Error fetching groups' });
   }
 });
@@ -380,7 +389,7 @@ app.post('/api/groups/join', authenticateToken, async (req, res) => {
 
     res.json({ message: 'Successfully joined group' });
   } catch (error) {
-    winston.error('Error joining group:', error);
+    logger.error('Error joining group:', error);
     if (error.code === '23505') { // Unique violation
       res.status(400).json({ error: 'Already a member of this group' });
     } else {
@@ -391,16 +400,16 @@ app.post('/api/groups/join', authenticateToken, async (req, res) => {
 
 // Socket.io connection handling
 io.on('connection', (socket) => {
-  winston.log('New client connected:', socket.id);
+  logger.log('New client connected:', socket.id);
   
   socket.on('join', (userId) => {
-    winston.info('User joined:', { userId });
+    logger.info('User joined:', { userId });
     socket.join(userId.toString());
     socket.emit('connected', { message: 'Successfully connected to server' });
   });
 
   socket.on('private message', async (data) => {
-    winston.log('Received private message from socket:', data);
+    logger.log('Received private message from socket:', data);
     const { senderId, receiverId, content, timestamp } = data;
     
     try {
@@ -427,13 +436,13 @@ io.on('connection', (socket) => {
       io.to(senderId.toString()).emit('private message', message);
       io.to(receiverId.toString()).emit('private message', message);
     } catch (error) {
-      winston.error('Error handling private message:', error);
+      logger.error('Error handling private message:', error);
       socket.emit('error', { message: 'Failed to send message' });
     }
   });
 
   socket.on('group message', async (data) => {
-    winston.info('Received group message from socket:', data);
+    logger.info('Received group message from socket:', data);
     const { senderId, groupId, content, timestamp } = data;
     
     try {
@@ -467,21 +476,21 @@ io.on('connection', (socket) => {
         io.to(member.user_id.toString()).emit('group message', message);
       });
     } catch (error) {
-      winston.error('Error handling group message:', error);
+      logger.error('Error handling group message:', error);
       socket.emit('error', { message: 'Failed to send group message' });
     }
   });
 
   socket.on('error', (error) => {
-    winston.error('Socket error:', error);
+    logger.error('Socket error:', error);
   });
 
   socket.on('disconnect', (reason) => {
-    winston.log('Client disconnected:', socket.id, 'Reason:', reason);
+    logger.log('Client disconnected:', socket.id, 'Reason:', reason);
   });
 });
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
-  winston.log(`Server running on port ${PORT}`);
+  logger.log(`Server running on port ${PORT}`);
 }); 
